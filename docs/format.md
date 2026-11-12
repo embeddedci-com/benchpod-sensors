@@ -6,7 +6,9 @@ change during a test, and **faults** describe what goes wrong and when. Both are
 so a library sensor never carries test data.
 
 Files are YAML (`.yaml`). JSON with the same structure is accepted everywhere; the pod itself only
-receives JSON. Unknown keys are errors, so a typo never goes unnoticed.
+receives JSON (`tools/yaml2json.py` converts). Unknown keys are errors, so a typo never goes unnoticed.
+Read YAML with the 1.2 rules: only `true` and `false` are booleans, so a key such as `on:` stays the
+word "on" (YAML 1.1 readers turn it into a boolean).
 
 ## 1. Common header
 
@@ -35,8 +37,15 @@ let:                        # optional, evaluated in order on every rebuild
   - adc_t: "solve(temp_c, temperature_c, 0, 0xFFFFF)"
 ```
 
-Limits per definition: 16 params, 64 constants, 16 functions, 64 `let` entries, 256 register or
-answer entries, 32 KB of JSON. The pod reports the limit that was hit.
+Limits per definition: 16 params, 64 constants, 16 functions, 16 fragments, 64 `let` entries,
+16 states, 255 register and command entries, 32 `on_write` rules, 32 messages, 32 requests,
+32 KB of JSON. A function has at most 8 arguments and 16 `let` entries; an expression or template
+at most 1024 characters, nested at most 20 deep. The compiled definition must fit 8 KB, and one
+rebuild, epoch or answer at most 200000 evaluation steps. The pod reports the limit that was hit.
+
+`constants` are numbers, strings, or expressions of numbers, earlier constants and built-in
+functions. Params are in `params` order; a param without `default` starts at 0 (or the end of its
+range nearest 0).
 
 ## 2. Expressions
 
@@ -49,7 +58,9 @@ Expressions are strings (a bare number is also accepted). They are evaluated wit
 - Tables: `[16384, 8192, 4096, 2048][i]`. The index is truncated; out of range is 0.
 - Registers: `reg[0xF4]` is the byte the DUT sees now at that register (its own writes
   included). `reg16be[a]`, `reg16le[a]` read two bytes.
-- Strings: `'N'`, only where a template or an answer takes text (5.2).
+- Strings: `'N'` (no escapes), where a template or an answer takes text (5.1). A `let`, a constant
+  or a function may hold a string, `c ? 'a' : 'b'` picks one, and `==` and `!=` compare them; any
+  other operator on a string is an error.
 
 ### 2.2 Operators
 
@@ -68,7 +79,13 @@ By precedence, high to low:
 | `&&` `\|\|` | short circuit |
 | `c ? a : b` | |
 
-Integer operators work on the value truncated to a 64-bit integer.
+Within a row the C order holds: `&` before `^` before `|`, `<` `<=` `>` `>=` before `==` `!=`, `&&`
+before `||`. Unlike C, comparisons bind looser than the bitwise operators, so `reg[0x6B] & 0x80 == 0x80`
+means `(reg[0x6B] & 0x80) == 0x80`. Unary minus binds tighter than `**`: `-2 ** 2` is 4.
+
+Integer operators work on the value truncated to a 64-bit integer. `%` is the float remainder (the
+sign of the dividend, like C `fmod`). A shift by 64 or more gives 0 (`>>` of a negative value: -1);
+a negative shift count shifts nothing.
 
 ### 2.3 Built-in functions
 
@@ -85,10 +102,15 @@ Integer operators work on the value truncated to a 64-bit integer.
 | `bits(x, hi, lo)` | the field x[hi:lo] |
 | `byte(x, n)` | byte n of x, 0 = least significant |
 | `crc8(poly, init, b...)` | CRC-8, MSB first, no reflection, no final XOR (Sensirion: `crc8(0x31, 0xFF, hi, lo)`) |
-| `crc16(poly, init, reflect, xorout, b...)` | CRC-16 (Modbus: `crc16(0x8005, 0xFFFF, 1, 0, ...)`) |
+| `crc16(poly, init, reflect, xorout, b...)` | CRC-16 (Modbus: `crc16(0x8005, 0xFFFF, 1, 0, ...)`); `reflect: 1` runs the register LSB first with the reflected polynomial, `init` as given |
 | `sum8(b...)` `xor8(b...)` | 8-bit sum and XOR |
 | `solve(f, target, lo, hi)` | see 2.4 |
-| `random(seed)` | a stable pseudo random number in [0, 1) |
+| `random(seed)` | a stable pseudo random number in [0, 1) (a hash of the seed) |
+| `hhmmss ddmmyy nmea_lat nmea_lon` | text, see 5.3 |
+
+`min` and `max` take 2 to 16 arguments. The pod computes `sin`, `exp`, `log`, `pow` and the others
+with its own fixed algorithms, so a definition gives the same bytes on the pod, in the browser
+preview and on the server.
 
 ### 2.4 Functions and `solve`
 
@@ -97,12 +119,20 @@ Functions may call earlier functions, never themselves.
 
 `solve(f, target, lo, hi)` finds the integer `x` in `[lo, hi]` for which `f(x)` is closest to
 `target`, by bisection. `f` is the name of a one-argument function that rises or falls
-monotonically over the range. This lets you write the datasheet's **decode** formula (the code your
+monotonically over the range (the direction comes from `f(lo)` and `f(hi)`). The search stops at an
+exact hit; otherwise the result is the closest of the values it tried. A value of `f` that is not a
+number (a division by zero) counts as past the far end. This lets you write the datasheet's **decode** formula (the code your
 driver runs, raw value to °C) and let the pod find the raw value, instead of inverting the formula
 yourself. At most 64 iterations; the pod reports a function that is not monotonic.
 
-Functions with more arguments are solved over their first argument: `solve(press_pa(_, adc_t),
-pressure_pa, 0, 0xFFFFF)`, where `_` marks the argument being solved.
+Functions with more arguments are solved over the argument marked `_`: `solve(press_pa(_, adc_t),
+pressure_pa, 0, 0xFFFFF)`. The other arguments are computed once, before the search. `hi - lo`
+is at most 4e18.
+
+Functions may use params, constants, states and lets besides their arguments. A function that
+reads a `let` can only be called after that let is set (from a later let, or from registers and
+messages). Fragments (5.1) may call functions and earlier fragments; functions cannot call
+fragments.
 
 ### 2.5 Built-in variables
 
@@ -111,8 +141,13 @@ pressure_pa, 0, 0xFFFFF)`, where `_` marks the argument being solved.
 | `t` | seconds since the sensor started (float) |
 | `utc` | `utc_start` param if the definition has one, plus `t`; seconds since 1970 |
 | `written`, `value` | address and value of the last DUT write (in `on_write`) |
-| `count` | how many times this answer or message was sent |
-| `fifo_level` | frames waiting in the FIFO (6.3) |
+| `count` | how many times this answer or message was sent before |
+| `i` | the repeat index of a message (5) |
+| `dt` | seconds since the previous state update (5.3) |
+| `fifo_level` | frames waiting in the FIFO (3.5) |
+| `input` | analog with `excitation: adc`: the voltage the pod measures (6) |
+
+`written` and `value` read -1 when the pod only knows that the DUT wrote, not where.
 
 ## 3. Registers (I2C and SPI)
 
@@ -129,12 +164,16 @@ registers:
 ```
 
 - Field types: `u8 s8 u16be u16le s16be s16le u24be u24le s24be s24le u32be u32le s32be s32le`
-  (saturated to the type), `bytes` (a list of expressions, each a byte), `text` (ASCII).
+  (rounded half away from zero, then saturated to the type), `bytes` (a list of expressions, each
+  rounded and saturated to 0..255; use `u8()` or `& 0xFF` to wrap instead), `text` (a fixed ASCII
+  string).
 - **When a register is loaded.** A register whose expression is a constant is loaded once, at power
   on and on a reset; after that it holds what the DUT writes (configuration). A register whose
   expression uses a param, `reg[]`, `t` or a `let` that does, is rebuilt on every change: a new
   value, a stimulus step, a DUT write. Override with `reload: power_on` or `reload: always`.
-- Entries are applied in order; where two overlap, the later one wins.
+- Entries are applied in order, `registers` then `commands`; where two overlap, the later one
+  wins, also when only one of them is rebuilt. An entry that runs past the end of the image wraps
+  to its start (after `wrap`).
 - Bytes no entry covers read `0x00`, or `fill:` if set at the top level.
 - `writable: false` keeps the DUT from changing a register (the pod restores it).
 
@@ -177,7 +216,8 @@ on_write:
     do: { set: { at: 0x3A, u8: 0 } }             # write to one register clears another
 ```
 
-Rules run after every DUT write, in order. `do` is `reset` or a `set` (one register entry). Register
+Rules run after every DUT write, in order, with `reg[]` showing the write. `do` is `reset` or a
+`set` (one register entry, written after the rebuild). The first rule that resets wins. Register
 expressions that read `reg[]` are rebuilt after every write anyway, so most sensors only need
 `on_write` for resets.
 
@@ -254,13 +294,23 @@ requests:                   # answers to what the DUT sends
 ```
 
 Messages with the same `every_ms` go out together, in file order (one epoch, like a GPS fix).
-`enabled:` (an expression) skips a message; `repeat: n` sends it n times with `i` = 0 .. n-1.
+`enabled:` (an expression) skips a message; `repeat: n` sends it n times with `i` = 0 .. n-1 (at
+most 64). `every_ms` is truncated to whole milliseconds (at least 1); each message keeps its own
+schedule, starting at t = 0, and `t` in an epoch is the time it was due. `end` defaults to `none`;
+the `nmea` checksum covers the characters after the leading `$` or `!`.
 
 ### 5.1 Templates
 
-`text` is literal text with `{expression}` or `{expression:format}` parts. Formats: `d`, `x`, `X`,
-`f`, with width, zero padding and precision as in C printf (`{lat:09.4f}`, `{sats:02d}`). An
-expression may give a string literal: `{lat >= 0 ? 'N' : 'S'}`; a string ignores the number
+`text` is literal text with `{expression}` or `{expression:format}` parts; `{{` and `}}` are
+literal braces. Formats: `d`, `x`, `X`, `f`, with the flags `-` `+` `0`, a width (at most 64) and a
+precision (at most 15) as in C printf (`{lat:09.4f}`, `{sats:02d}`). `d`, `x` and `X` truncate to
+an integer; `f` rounds half away from zero (default precision 6). Without a format, a whole number
+prints as an integer and others with up to 6 decimals, trailing zeros dropped. Numbers of 1e18 and
+more print as `d.dddddde+NNN`.
+
+The format is what follows the last `:` outside brackets and quotes, when it reads as a format and
+does not start with a space, so write a ternary's `:` with a space after it: `{have ? sats : 0:02d}`.
+An expression may give a string literal: `{lat >= 0 ? 'N' : 'S'}`; a string ignores the number
 format, so `{have ? hdop : '':.2f}` prints an empty field without a fix.
 
 `fragments:` are named pieces of text with optional `args`, used like functions inside a template:
@@ -275,6 +325,13 @@ messages:
     text: "$GPGSV,1,1,04{sat(0)}{sat(1)}{sat(2)}{sat(3)}"
 ```
 
+### 5.2 Byte answers
+
+`answer` is a list of byte expressions, as in `bytes` (3). `match` lists bytes or `"*"` (at most
+64) and matches the last bytes received; `match_line` matches a whole line without its CR/LF. A
+request must arrive within 100 ms between bytes, else matching starts over. The first request that
+matches answers, after `delay_ms`.
+
 ### 5.3 State
 
 Some sensors integrate over time: a GPS position moves along its course at its speed.
@@ -287,17 +344,14 @@ state:
     follow: lat_deg          # optional: a new value of this param resets the state to init
 ```
 
-State is updated before each epoch (UART) or each rebuild (I2C, SPI); `dt` is the time since the
-previous update in seconds. State works in every kind.
+State is updated before each epoch (UART) or each rebuild (I2C, SPI), in order: a later state sees
+the new value of an earlier one. `dt` is the time since the previous update in seconds (0 at the
+start). State expressions use params, constants, functions, states and built-in variables, not
+lets. State works in every kind.
 
-Helpers for common formats: `hhmmss(utc)` (`123456.00`), `ddmmyy(utc)`, `nmea_lat(deg)`
-(`4807.0380,N`), `nmea_lon(deg)` (`01131.0000,E`). They are ordinary built-ins and may be used
-anywhere.
-
-### 5.2 Byte answers
-
-`answer` is a list of byte expressions, as in `bytes` (3). `match` lists bytes or `"*"`; a request
-must arrive within 100 ms between bytes, else matching starts over.
+Helpers for common formats: `hhmmss(utc)` (`123456.00`, hundredths of a second), `ddmmyy(utc)`,
+`nmea_lat(deg)` (`4807.03800,N`), `nmea_lon(deg)` (`01131.00000,E`), minutes with 5 decimals. They
+are ordinary built-ins and may be used anywhere.
 
 ## 6. Analog sensors
 
@@ -311,7 +365,7 @@ range: { min: 0, max: 3.3 } # the output is clamped to this range
 excitation: none            # none | adc: the value may use `input`, the voltage the pod measures
 ```
 
-An analog sensor only maps a value to an output. It uses the pod's existing outputs: a set value is
+A value that is not a number gives `range.min`. An analog sensor only maps a value to an output. It uses the pod's existing outputs: a set value is
 a DC output, a stimulus becomes a waveform, a recording stays a recording.
 
 ## 7. Stimulus
@@ -351,13 +405,24 @@ Segment shapes:
 
 Signals run side by side; each holds its last value after its last segment. Values are applied at
 up to 100 updates per second (`rate_hz` at the top level, default 50), and clamped to the param's
-range.
+range. A segment without `start` (or `mean`) starts from the value the previous one ended with:
+`sine`, `saw` and `pulse` end with their value at their end time, `noise` with its mean. Noise is a
+function of `seed` and the sample number in the segment (`rate_hz` samples per second), so a replay
+is the same. `data` points start at 0 s or later and never go back in time; before the first point
+the signal has the first value. The pod takes `points` only: `tools/yaml2json.py` reads a `file`
+and inlines it. `repeat` needs `count` of 1 or more and nests at most 4 deep; `repeat: true` at the
+top level loops signals and faults with the longest signal's duration.
+
+Limits per stimulus: 16 signals, 256 segments (repeats count their body once), 1024 points per
+`data` segment, 32 faults, 8 KB compiled.
 
 ## 8. Faults
 
 Faults are a list in a stimulus file, or applied immediately through the API. Each has `type`, and
 optionally `at_s`, `duration_s` (default: until cleared), `sensor` (with several sensors) and
-`param`.
+`param`. `stuck` without `param` freezes the whole sensor; with one, that param. `offset` and
+`gain` need `param` and `value`, `corrupt` needs `at` and `mask`, `drop` a `value`, `baud_error` a
+`value`; `garbage` takes `rate_hz` (default 100).
 
 | Type | Kinds | Effect |
 |---|---|---|
@@ -382,4 +447,6 @@ its `name`), which stimulus signals and faults use as a prefix (`env.temperature
 ## 10. Errors
 
 Every error names the file location as a path (`registers[3].s16be`) and, for expressions, the
-character offset: `registers[3].s16be: unknown name 'acel_lsb' at 12`.
+character offset: `registers[3].s16be: unknown name 'acel_lsb' at 12`. The pod also runs a new
+definition once at its defaults, so an evaluation error (a string in arithmetic, a `solve` that is
+not monotonic, the step limit) is reported with its path when the definition is loaded.
