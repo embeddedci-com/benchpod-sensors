@@ -379,6 +379,9 @@ a DC output, a stimulus becomes a waveform, a recording stays a recording.
 format: 1
 kind: stimulus
 name: hot_afternoon
+label: "A hot afternoon"     # optional, like a definition's label
+description: |              # optional, Markdown
+  Warms up, holds, a short fault.
 repeat: false               # loop the whole stimulus
 signals:
   temperature_c:            # a param; with several sensors: env.temperature_c
