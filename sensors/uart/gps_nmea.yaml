@@ -23,14 +23,14 @@ params:
 
 uart: { baud: 9600, format: 8N1 }
 
-state:                       # updated before each fix, dt = seconds since the previous one
+state:                       # updated before each fix, in order, dt = seconds since the previous one
   - name: lat
     init: lat_deg
-    update: "lat + speed_kmh / 3.6 * dt * cos(rad(course_deg)) / 111320"
+    update: "clamp(lat + speed_kmh / 3.6 * dt * cos(rad(course_deg)) / 111320, -90, 90)"
     follow: lat_deg          # a new lat_deg value (set or stimulus) resets the state
-  - name: lon
+  - name: lon                # sees the new lat; no east-west step at the poles
     init: lon_deg
-    update: "lon + speed_kmh / 3.6 * dt * sin(rad(course_deg)) / (111320 * cos(rad(lat)))"
+    update: "abs(cos(rad(lat))) > 1e-6 ? wrap180(lon + speed_kmh / 3.6 * dt * sin(rad(course_deg)) / (111320 * cos(rad(lat)))) : lon"
     follow: lon_deg
 
 constants:
@@ -46,6 +46,9 @@ functions:
   prn:
     args: [j]
     return: "[2, 5, 7, 9, 12, 13, 15, 18, 20, 23, 25, 29][j]"
+  wrap180:                   # longitude back into -180..180
+    args: [x]
+    return: "x > 180 ? x - 360 : x < -180 ? x + 360 : x"
 
 fragments:                   # reusable pieces of text
   lat_f: { text: "{have ? nmea_lat(lat) : ','}" }
