@@ -1,0 +1,42 @@
+format: 1
+kind: i2c
+name: tmp117
+label: "TI TMP117: high-accuracy temperature"
+description: |
+  The 16-bit temperature result at 7.8125 m°C per LSB, the device ID (0x0117) and the
+  temperature offset register: an offset the DUT writes is added to the result, as on the part.
+  A soft reset through CONFIG reloads the power-on image.
+
+  The part's registers are 16 bits wide at consecutive pointers, while the pod serves a byte
+  image: a 2-byte read at pointer p returns bytes p and p + 1. TEMP_RESULT (0x00), TEMP_OFFSET
+  (0x07) and DEVICE_ID (0x0F) read back exactly. CONFIG (0x01) reads the low byte of the
+  temperature as its high byte, so its Data_Ready flag (bit 13) does not work: read the result in
+  continuous mode (the power-on mode) without polling the flag. The alert limits and the EEPROM
+  are not modeled.
+datasheet: https://www.ti.com/product/TMP117
+version: 1.0.0
+license: Apache-2.0
+
+params:
+  - { key: temperature_c, unit: C, min: -55, max: 150, default: 25, label: Temperature }
+
+i2c:
+  address: 0x48
+  alt_addresses: [0x49, 0x4A, 0x4B]
+  auto_increment: true
+
+constants:
+  LSB_C: 0.0078125           # datasheet 7.3.1: 1 LSB = 7.8125 m°C
+
+let:
+  - offset_c: "s16(reg16be[0x07]) * LSB_C"
+
+registers:
+  - { at: 0x00, s16be: "(temperature_c + offset_c) / LSB_C", name: TEMP_RESULT }
+  - { at: 0x02, u8: 0x20, name: CONFIG_low }            # CONFIG = 0x0220 after power on
+  - { at: 0x07, s16be: 0, name: TEMP_OFFSET }           # the DUT's writes stay
+  - { at: 0x0F, u16be: 0x0117, name: DEVICE_ID, writable: false }
+
+on_write:
+  - when: "written == 0x02 && (value & 0x02)"           # CONFIG Soft_Reset (bit 1)
+    do: reset
