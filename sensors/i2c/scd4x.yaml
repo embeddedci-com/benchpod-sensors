@@ -1,0 +1,49 @@
+format: 1
+kind: i2c
+name: scd4x
+label: "Sensirion SCD4x: CO2, temperature and humidity"
+description: |
+  The SCD40/SCD41 read_measurement command (0xEC05): CO2 in ppm, temperature and humidity, each
+  word with its CRC-8, after the command's 1 ms execution time (reads are not acknowledged before).
+
+  Why the SCD4x and not the SCD30: the SCD4x answers its read commands after a fixed 1 ms, well
+  inside the pod's 65.535 ms command time, and its slow commands (stop_periodic_measurement
+  500 ms, measure_single_shot 5 s, perform_self_test 10 s, persist_settings 800 ms) return no
+  data, so the DUT's own wait covers them and the pod only acknowledges them. The SCD30 holds the
+  clock (clock stretching) while it prepares an answer, needs 3 ms between command and read, and
+  sends IEEE floats.
+
+  The pod serves one 256-byte window of the 16-bit command space (0xEC00 to 0xECFF here), so
+  get_data_ready_status (0xE4B8), get_serial_number (0x3682) and the settings reads return 0x00
+  bytes, which fail their CRC. Drivers that call read_measurement on a fixed interval work;
+  drivers that require one of the other reads first report an error.
+datasheet: https://sensirion.com/products/catalog/SCD41
+version: 1.0.0
+license: Apache-2.0
+
+params:
+  - { key: co2_ppm, unit: ppm, min: 0, max: 40000, default: 600, label: CO2 }
+  - { key: temperature_c, unit: C, min: -10, max: 60, default: 25, label: Temperature }
+  - { key: humidity_pct, unit: "%", min: 0, max: 100, default: 40, label: Humidity }
+
+i2c:
+  address: 0x62
+  register_address_bits: 16
+  page: 0xEC00
+
+functions:
+  word_crc:
+    args: [w, n]
+    return: "n == 0 ? byte(w, 1) : n == 1 ? byte(w, 0) : crc8(0x31, 0xFF, byte(w, 1), byte(w, 0))"
+
+let:
+  - co2: "sat_u16(co2_ppm)"
+  - st: "sat_u16((temperature_c + 45) * 65536 / 175)"     # datasheet 3.6.2: T = -45 + 175 * word / 2^16
+  - srh: "sat_u16(humidity_pct * 65536 / 100)"            # RH = 100 * word / 2^16
+
+commands:
+  - command: 0xEC05          # read_measurement
+    busy_us: 1000
+    answer: ["word_crc(co2, 0)", "word_crc(co2, 1)", "word_crc(co2, 2)",
+             "word_crc(st, 0)", "word_crc(st, 1)", "word_crc(st, 2)",
+             "word_crc(srh, 0)", "word_crc(srh, 1)", "word_crc(srh, 2)"]
