@@ -304,9 +304,9 @@ error). Needs `register_address_bits: 8`; `wrap` does not apply. Firmware 3.10.2
 `register_address_bits: 16` without `page` serves 16-bit addresses (Sensirion commands) with any
 high byte from the one 256-byte image: the pod places each address's bytes (the entry's, or its
 `write_bytes`, whichever is longer) and one byte per high byte in use, and the gateware follows
-the layout. The entries of different addresses must not overlap (`0x2400` with 6 bytes and
-`0x2403` is an error), and everything must fit in 256 bytes: the answers plus one byte per high
-byte. A command the definition does not list reads whatever the layout of its high byte points at
+the layout. Each address gets its own bytes even where address ranges overlap (SHT3x 0x2C0D's six
+bytes and 0x2C10); `reg[a]` reads the entry at `a`, else the bytes after the nearest address below.
+Everything must fit in 256 bytes: the answers plus one byte per high byte. A command the definition does not list reads whatever the layout of its high byte points at
 (drivers check the CRC). `wrap` does not apply. Firmware 3.10.2 and later; with `page` the old
 single window is kept.
 
