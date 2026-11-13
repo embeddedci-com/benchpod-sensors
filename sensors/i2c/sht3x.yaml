@@ -1,0 +1,41 @@
+format: 1
+kind: i2c
+name: sht3x
+label: "Sensirion SHT3x: temperature and humidity"
+description: |
+  Single-shot measurements without clock stretching (commands 0x2400, 0x240B and 0x2416: high,
+  medium and low repeatability), the way the vendor's and most open drivers read the part. Each
+  answer is the temperature word and the humidity word, each with its CRC-8. Reads are not
+  acknowledged until the measurement time has passed, as on the part.
+
+  The pod serves one 256-byte window of the 16-bit command space (0x2400 to 0x24FF here), so the
+  clock-stretching commands (0x2Cxx), periodic mode with fetch (0xE000), the status register
+  (0xF32D) and the heater are not served: their reads return 0x00 bytes. A soft reset (0x30A2)
+  is acknowledged and changes nothing.
+datasheet: https://sensirion.com/products/catalog/SHT31-DIS-B
+version: 1.0.0
+license: Apache-2.0
+
+params:
+  - { key: temperature_c, unit: C, min: -40, max: 125, default: 25, label: Temperature }
+  - { key: humidity_pct, unit: "%", min: 0, max: 100, default: 40, label: Humidity }
+
+i2c:
+  address: 0x44
+  alt_addresses: [0x45]
+  register_address_bits: 16
+  page: 0x2400
+
+functions:
+  word_crc:                  # a data word and its CRC, as every SHT3x answer word
+    args: [w, n]
+    return: "n == 0 ? byte(w, 1) : n == 1 ? byte(w, 0) : crc8(0x31, 0xFF, byte(w, 1), byte(w, 0))"
+
+let:
+  - st: "sat_u16((temperature_c + 45) * 65535 / 175)"     # datasheet 4.13
+  - srh: "sat_u16(humidity_pct * 65535 / 100)"
+
+commands:                    # maximum measurement durations, datasheet table 4
+  - { command: 0x2400, busy_us: 15000, answer: &measure ["word_crc(st, 0)", "word_crc(st, 1)", "word_crc(st, 2)", "word_crc(srh, 0)", "word_crc(srh, 1)", "word_crc(srh, 2)"] }
+  - { command: 0x240B, busy_us: 6000, answer: *measure }
+  - { command: 0x2416, busy_us: 4000, answer: *measure }
