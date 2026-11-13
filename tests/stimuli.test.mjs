@@ -44,7 +44,7 @@ test("temperature_ramp_fault", () => {
   assert.equal(at("temperature_c", 100), 60);
   assert.equal(at("temperature_c", 150), 22);
   assert.deepEqual(windows, [["stuck", [[50, 60]]], ["no_response", [[120, 123]]]]);
-  for (const sensor of ["sensors/i2c/tmp117.yaml", "sensors/i2c/sht3x.yaml", "sensors/analog/ntc_10k_divider.yaml"])
+  for (const sensor of ["sensors/i2c/bme280.yaml", "sensors/i2c/sht4x.yaml", "sensors/analog/ntc_10k_divider.yaml"])
     drives(s, sensor);
 });
 
