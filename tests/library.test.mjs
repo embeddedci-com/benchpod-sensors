@@ -35,6 +35,10 @@ for (const path of stimuli) {
   });
 }
 
+test("sensor names work as instance names (a-z, 0-9, _; at most 16 characters)", () => {
+  for (const p of sensors) assert.match(basename(p, ".yaml"), /^[a-z0-9_]{1,16}$/, p);
+});
+
 test("names are unique", () => {
   const names = [...sensors, ...stimuli].map((p) => basename(p, ".yaml"));
   assert.equal(new Set(names).size, names.length);

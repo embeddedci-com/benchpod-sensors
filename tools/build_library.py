@@ -35,13 +35,13 @@ def entries():
                     if not isinstance(doc.get(key), str):
                         sys.exit(f"{path}: no {key}")
                 out.append({"path": path, "name": doc["name"], "kind": doc["kind"],
-                            "label": doc.get("label") or doc["name"]})
+                            "label": doc.get("label") or ""})
     return sorted(out, key=lambda e: e["path"])
 
 
 def render():
     lib = {"format": FORMAT, "version": VERSION, "entries": entries()}
-    return json.dumps(lib, indent=2, ensure_ascii=False) + "\n", len(lib["entries"])
+    return json.dumps(lib, indent=2) + "\n", len(lib["entries"])
 
 
 def main():
