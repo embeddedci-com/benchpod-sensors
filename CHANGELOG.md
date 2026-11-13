@@ -2,6 +2,11 @@
 
 The library's releases, tagged `vX.Y.Z`. A sensor's own `version` changes when its behavior does.
 
+## Unreleased
+
+- The checks use the engine from benchpod-firmware 3.10.4 (`tools/engine`): a command's answer
+  in the dynamic list behaves as on the pod. No sensor changed.
+
 ## 0.1.0
 
 The first release, for format 1.

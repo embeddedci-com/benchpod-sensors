@@ -6,7 +6,7 @@ desktop apps run. The library's checks (`tools/validate.mjs`, `tests/`) use it, 
 that passes here loads on a pod with the same firmware.
 
 - Source: [benchpod-firmware](https://github.com/embeddedci-com/benchpod-firmware), tag
-  `stm32-v3.10.2` (firmware 3.10.2: word registers and the command map), the engine's WASM build
+  `stm32-v3.10.4` (firmware 3.10.4: word registers, the command map, command answers in the dynamic list), the engine's WASM build
   (`make` in its `stm32h563/wasm/` directory). ABI version 1.
 - `SHA256SUMS` lists both files; `shasum -a 256 -c SHA256SUMS` (or `sha256sum -c`) checks them.
 
