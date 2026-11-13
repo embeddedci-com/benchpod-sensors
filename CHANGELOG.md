@@ -12,5 +12,5 @@ The first release, for format 1.
   `ntc_10k_divider` and `pressure_4_20ma` (analog). They need firmware 3.10.2 or later.
 - Stimuli: `temperature_ramp_fault`, `gps_drive`, `pressure_drop`.
 - A test per new sensor that reads it back the way the vendor's driver does, and checks of every
-  file with the pod's engine (`tools/engine`, from benchpod-firmware e95ff6a).
+  file with the pod's engine (`tools/engine`, from benchpod-firmware 3.10.2).
 - `library.json`, the index clients read.
