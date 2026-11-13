@@ -17,7 +17,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "tools"))
 import yaml2json  # noqa: E402
 
-VERSION = "0.1.1"
+VERSION = "0.1.0"
 FORMAT = 1
 OUT = os.path.join(ROOT, "library.json")
 

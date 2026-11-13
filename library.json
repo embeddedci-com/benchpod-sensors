@@ -1,6 +1,6 @@
 {
   "format": 1,
-  "version": "0.1.1",
+  "version": "0.1.0",
   "entries": [
     {
       "path": "sensors/analog/ntc_10k_divider.yaml",
