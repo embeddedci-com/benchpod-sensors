@@ -51,6 +51,25 @@ export const u16be = (img, a) => (img[a] << 8) | img[a + 1];
 export const s16be = (img, a) => { const v = u16be(img, a); return v >= 0x8000 ? v - 0x10000 : v; };
 export const s16le = (img, a) => { const v = img[a] | (img[a + 1] << 8); return v >= 0x8000 ? v - 0x10000 : v; };
 
+/** Word registers (i2c.register_bytes: 2): register p as the DUT reads it, image bytes 2p, 2p + 1. */
+export const word = (img, p) => u16be(img, 2 * (p & 0x7f));
+/** The image bytes a DUT's write of word w to register p lands on, for imageAfterWrites. */
+export const wordWrite = (p, w) => [[2 * (p & 0x7f), (w >> 8) & 0xff], [2 * (p & 0x7f) + 1, w & 0xff]];
+
+/**
+ * Command map (register_address_bits: 16 without page): the n bytes a DUT reads after command
+ * cmd, through the gateware's lookup (the pointer becomes image[cmd >> 8] ^ (cmd & 0xFF)).
+ */
+export function commandBytes(img, cmd, n) {
+  const at = img[cmd >> 8] ^ (cmd & 0xff);
+  return Array.from({ length: n }, (_, k) => img[(at + k) & 0xff]);
+}
+/** The image bytes a DUT's command cmd with data bytes lands on, for imageAfterWrites. */
+export function commandWrite(img, cmd, bytes) {
+  const at = img[cmd >> 8] ^ (cmd & 0xff);
+  return bytes.map((b, k) => [(at + k) & 0xff, b]);
+}
+
 /** Sensirion CRC-8 (poly 0x31, init 0xFF), written out as the vendor drivers do. */
 export function sensirionCrc(bytes) {
   let crc = 0xff;
